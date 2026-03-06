@@ -5,7 +5,7 @@ import (
 )
 
 func TestIsIgnored(t *testing.T) {
-	// Define our test cases
+	
 	tests := []struct {
 		name     string
 		path     string

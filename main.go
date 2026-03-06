@@ -5,12 +5,14 @@ import (
 	"log/slog"
 	"os"
 	"time"
+	"fmt"
+	"strings"
 
 	"github.com/fsnotify/fsnotify"
 )
 
 func main() {
-	// 1. Define the command-line flags
+	// 1. Defining the command-line flags
 	rootFlag := flag.String("root", ".", "Directory to watch for file changes")
 	buildFlag := flag.String("build", "", "Command used to build the project")
 	execFlag := flag.String("exec", "", "Command used to run the built server")
@@ -50,10 +52,10 @@ func main() {
 	// Initialize the Runner
 	runner := NewRunner(*buildFlag, *execFlag)
 
-	// Trigger the very first build immediately (Requirement)
+	// Trigger the very first build immediately
 	go runner.TriggerBuildAndRun()
 
-	// Debounce logic parameters
+	// Debounce logic parameters set
 	debounceDuration := 500 * time.Millisecond
 	var timer *time.Timer
 
@@ -67,10 +69,10 @@ func main() {
 				return
 			}
 
-			// We only care about Writes, Creates, or Removes
+			// We will only look about Writes, Creates or Removes in the file
 			if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Remove) {
 
-				// Bonus point: If a developer creates a new folder, watch it dynamically!
+				// If a developer creates a new folder, watch it dynamically!
 				if event.Has(fsnotify.Create) {
 					info, err := os.Stat(event.Name)
 					if err == nil && info.IsDir() && !isIgnored(event.Name) {
@@ -84,6 +86,9 @@ func main() {
 					timer.Stop()
 				}
 				timer = time.AfterFunc(debounceDuration, func() {
+					// Added a divider for a better visibility
+					fmt.Printf("\n%s\n", strings.Repeat("━", 60))
+					
 					slog.Info("Changes detected, reloading...", "file", event.Name)
 					runner.TriggerBuildAndRun()
 				})

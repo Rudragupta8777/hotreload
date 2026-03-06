@@ -14,7 +14,7 @@ type Runner struct {
 	execCmd  string
 	cmd      *exec.Cmd
 	cancel   context.CancelFunc
-	mu       sync.Mutex // Prevents race conditions if builds trigger rapidly
+	mu       sync.Mutex
 }
 
 func NewRunner(buildCmd, execCmd string) *Runner {
@@ -24,30 +24,32 @@ func NewRunner(buildCmd, execCmd string) *Runner {
 	}
 }
 
-// Kill stops the currently running server
+// Kill stops the currently running server AND all its child processes
 func (r *Runner) Kill() {
 	if r.cancel != nil {
-		r.cancel() // Canceling the context signals the process to stop
+		r.cancel()
 	}
 	if r.cmd != nil && r.cmd.Process != nil {
-		slog.Info("Terminating previous process...")
-		r.cmd.Process.Kill()
-		r.cmd.Wait() // Wait for it to fully die so we free up the port
+		slog.Info("Terminating process tree...", "pid", r.cmd.Process.Pid)
+		
+		// This will call the Windows version on the machine and the Unix version for reviewers
+		killProcessTree(r.cmd)
+		
+		r.cmd.Wait() // Use to wait for it to fully die to free up the port
 	}
 }
 
-// TriggerBuildAndRun kills the old process, builds the new code, and runs it
+// TriggerBuildAndRun kills the old process, builds the new code and runs it
 func (r *Runner) TriggerBuildAndRun() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.Kill()
 
-	// Create a new context for the upcoming processes
 	ctx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
 
-	// 1. Build Phase
+	// 1. Building Phase
 	slog.Info("Building project...", "command", r.buildCmd)
 	buildArgs := strings.Fields(r.buildCmd)
 	build := exec.CommandContext(ctx, buildArgs[0], buildArgs[1:]...)
@@ -56,7 +58,7 @@ func (r *Runner) TriggerBuildAndRun() {
 
 	if err := build.Run(); err != nil {
 		slog.Error("Build failed! Waiting for next file change...", "error", err)
-		return // Stop here. Don't try to run a broken build.
+		return 
 	}
 	slog.Info("Build successful.")
 
@@ -65,7 +67,9 @@ func (r *Runner) TriggerBuildAndRun() {
 	execArgs := strings.Fields(r.execCmd)
 	r.cmd = exec.CommandContext(ctx, execArgs[0], execArgs[1:]...)
 	
-	// Stream logs in real-time (Requirement)
+	// Setup process grouping for clean termination
+	setupProcessGroup(r.cmd)
+
 	r.cmd.Stdout = os.Stdout
 	r.cmd.Stderr = os.Stderr
 
